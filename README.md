@@ -24,7 +24,11 @@ When the job is finished or failed, the owner gets an email.
 - **Bulk runs.** A run puts many jobs under one parent job. The run reports one outcome and sends one email, and not one email for each item.
 - **Safe for parallel workers.** The run counts each child one time only, and only one worker can settle the run.
 - **Extensible job types.** Each domain or package can have its own enum of job types.
-- **A log for each job.** Each job writes to its own log file.
+- **A log for each job, on all servers.** The logs are in the database by default, so each server can read them. Entries are written in batches.
+- **Ready for many servers.** Temporary files are on a filesystem disk, and the logs are in the database. Any worker can process a job, and any web server can show it.
+- **Status that stays true.** A job middleware keeps the status in step with the queued job, and a command fails the jobs whose worker stopped.
+- **Progress.** Runs count their children. A standalone job can report its own progress.
+- **Retention.** Old jobs, their logs and their files are pruned with `model:prune`.
 - **Notifications.** The owner gets an email when a job or a run is finished or failed.
 - **Live updates.** Each status change broadcasts. A page can refresh when a job changes.
 - **Headless Livewire components.** Base components give the behavior of the job pages. You supply the views.
@@ -38,7 +42,7 @@ Install the package with Composer:
 composer require bernskiold/laravel-background-jobs
 ```
 
-Publish and run the migration:
+Publish and run the migrations. They make the `background_jobs` table and the `background_job_logs` table:
 
 ```bash
 php artisan vendor:publish --tag=background-jobs-migrations
@@ -124,10 +128,31 @@ Each status change fires the `BackgroundJobChangedStatus` event.
 
 ```php
 $job->logChannel()->info('Read 1 200 rows.');
-$job->logChannel()->error('Row 1 201 is broken.');
+$job->logChannel()->error('Row 1 201 is broken.', ['row' => 1201]);
 
-$job->getLogContents();
+$job->logEntries();                 // the latest entries, as LogEntry objects
+$job->getLogContents();             // the latest entries, as text
 $job->getLogContentsForLevel('error');
+```
+
+The `logs.store` config decides where the logs are kept:
+
+| Store | Use |
+| --- | --- |
+| `database` (default) | The `background_job_logs` table. All servers can read the logs. A log is deleted with its job. |
+| `file` | One local file for each job. Use it only when one server runs the web requests and the workers. |
+| A class name | Your own store, which implements the `BackgroundJobLogStore` contract. |
+
+The logger keeps the entries in a buffer and writes them in batches. It writes the buffer when it is full (`logs.buffer_size`), when the oldest entry is older than `logs.flush_interval` seconds, at once for an error, when the job settles, when a queued job ends, and when the process stops.
+
+A job that logs in a database transaction loses the entries when the transaction rolls back. Set `logs.connection` to a separate connection to prevent this.
+
+#### Move from log files to the database
+
+The versions before the database store kept each log in a file. Run this command one time on each server that has log files:
+
+```bash
+php artisan background-jobs:import-file-logs --delete
 ```
 
 ### Store data in the meta
@@ -140,7 +165,44 @@ $job->appendMetaArrayItem('warnings', 'Row 12 has no date.');
 
 `incrementMetaItem()` and `appendMetaArrayItem()` lock the row. Parallel jobs can use them on the same job.
 
-When the meta has a `file_path` item, the package deletes that file when the job is finished or failed.
+### Temporary files
+
+A job often uses a file, for example an upload that it imports. Record the file on a filesystem disk:
+
+```php
+$path = $request->file('import')->store('imports', 's3');
+
+$job->setTemporaryFile($path, disk: 's3');
+```
+
+The package deletes the file when the job is finished or failed. To read the file in the queued job, use `localPath()`. It downloads a file from a remote disk to the local temporary directory one time:
+
+```php
+$file = $job->temporaryFile();
+
+$rows = SimpleExcelReader::create($file->localPath())->getRows();
+
+$file->cleanUp(); // delete the local copy
+```
+
+Use a disk that all servers can read, for example S3. Then any worker can process the job. A `file_path` item in the meta, from earlier versions, still works, but only on the server that has the file.
+
+### Progress
+
+A run counts its children. A standalone job can report its own progress:
+
+```php
+$job->setProgressTotal(count($rows));
+
+foreach ($rows as $row) {
+    // ...
+    $job->advanceProgress();
+}
+
+$job->progressPercentage(); // 0 to 100
+```
+
+`advanceProgress()` adds the number in the database, so parallel workers do not lose an update.
 
 ### Bulk runs
 
@@ -173,6 +235,43 @@ When all the children are settled, the run gets its final status:
 Use `noteSkipped()` for an item that you do not dispatch on purpose. A skipped item is not a failure. The email shows skipped items separately.
 
 The `item_label` meta item gives the noun for the email, for example "All 40 reports completed successfully".
+
+### Queued jobs
+
+Add the `TrackBackgroundJob` middleware and the `InteractsWithBackgroundJob` trait to a queued job that does the work of a background job. The job must have a `backgroundJob` property:
+
+```php
+use Bernskiold\LaravelBackgroundJobs\Concerns\InteractsWithBackgroundJob;
+use Bernskiold\LaravelBackgroundJobs\Jobs\Middleware\TrackBackgroundJob;
+
+class ImportReport implements ShouldQueue
+{
+    use InteractsWithBackgroundJob, Queueable;
+
+    public function __construct(public BackgroundJob $backgroundJob) {}
+
+    public function middleware(): array
+    {
+        return [TrackBackgroundJob::andFinish()];
+    }
+
+    public function handle(): void
+    {
+        // Only the work. The middleware sets the status.
+    }
+}
+```
+
+The middleware:
+
+- does not run the queued job when the background job has failed. In a batch, one failure thus stops the jobs after it,
+- sets the background job to processing,
+- fails the background job with the message of an exception, and gives the exception to the queue,
+- finishes the background job when you use `andFinish()`. Do not use it when a batch or a later job finishes the background job.
+
+The trait fails the background job in `failed()`. The queue calls `failed()` also after a timeout, which the middleware cannot see. If your job has its own `failed()` method, call `$this->failBackgroundJob($exception)` from it.
+
+For a job that the queue must retry, use `new TrackBackgroundJob(failOnException: false)`. Otherwise the first exception fails the background job and the retry does not run.
 
 ### Wait for jobs in a chain
 
@@ -327,15 +426,36 @@ class BackgroundJobs extends BackgroundJobList
 
 The components refresh when a job changes. Override `query()`, `columns()` or the ability methods to change their behavior.
 
-## The safety net
+## Stale jobs and the safety net
 
-A child can stop without a final status, for example when a worker runs out of memory. Then its run cannot settle, and the owner gets no email. Schedule the reconcile command to find these runs:
+When a worker stops during a job, for example because it runs out of memory, nothing changes the status of the job. Schedule two commands:
 
 ```php
+Schedule::command('background-jobs:fail-stale')->hourly()->withoutOverlapping();
 Schedule::command('background-jobs:reconcile-runs')->everyFifteenMinutes()->withoutOverlapping();
 ```
 
-The command counts the children again and settles the runs that are complete. It does not change a run with children that still run. It warns about a run that runs for more than 24 hours.
+`background-jobs:fail-stale` fails each job that is waiting or processing and has had no update for `stale_after_hours`. A status change, a log entry, a meta change and progress each update the job. Thus a long job that logs or reports progress stays alive. The command also seals a stale run that was never sealed, so that the run can settle.
+
+`background-jobs:reconcile-runs` counts the children of unsettled runs again, and settles the runs that are complete. It does not change a run with children that still run. It warns about a run that runs for more than 24 hours.
+
+## Retention
+
+Set the retention in days, and schedule `model:prune` for your model:
+
+```php
+// config/background-jobs.php
+'retention' => [
+    'days' => 90,          // finished jobs
+    'failed_days' => 365,  // failed jobs
+],
+```
+
+```php
+Schedule::command('model:prune', ['--model' => [App\Models\BackgroundJob::class]])->daily();
+```
+
+The command deletes settled jobs that are older than the retention, with their children, their logs and their temporary files. A value of `null` keeps those jobs forever. Running jobs are never deleted.
 
 ## Testing
 

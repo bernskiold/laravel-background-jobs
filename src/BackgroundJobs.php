@@ -4,6 +4,7 @@ namespace Bernskiold\LaravelBackgroundJobs;
 
 use Bernskiold\LaravelBackgroundJobs\Contracts\BackgroundJobType;
 use Bernskiold\LaravelBackgroundJobs\Exceptions\InvalidBackgroundJobType;
+use Bernskiold\LaravelBackgroundJobs\Logging\BackgroundJobLogs;
 use Bernskiold\LaravelBackgroundJobs\Models\BackgroundJob;
 use Closure;
 use Illuminate\Database\Query\Builder;
@@ -59,6 +60,11 @@ class BackgroundJobs
     public static function userModel(): string
     {
         return config('background-jobs.user_model') ?? config('auth.providers.users.model');
+    }
+
+    public static function logs(): BackgroundJobLogs
+    {
+        return app(BackgroundJobLogs::class);
     }
 
     public static function staleAfterHours(): int

@@ -9,15 +9,17 @@ use Bernskiold\LaravelBackgroundJobs\Contracts\BackgroundJobType;
 use Bernskiold\LaravelBackgroundJobs\Database\Factories\BackgroundJobFactory;
 use Bernskiold\LaravelBackgroundJobs\Enums\BackgroundJobStatus;
 use Bernskiold\LaravelBackgroundJobs\Events\BackgroundJobChangedStatus;
+use Bernskiold\LaravelBackgroundJobs\Logging\LogEntry;
+use Bernskiold\LaravelBackgroundJobs\Support\TemporaryFile;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Prunable;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Psr\Log\LoggerInterface;
 
@@ -40,6 +42,8 @@ use Psr\Log\LoggerInterface;
  * @property int|null $children_expected
  * @property int $children_succeeded
  * @property int $children_failed
+ * @property int|null $progress_total
+ * @property int $progress_processed
  * @property Carbon|null $sealed_at
  * @property Carbon|null $finished_at
  * @property Carbon|null $rolled_up_at
@@ -52,7 +56,7 @@ use Psr\Log\LoggerInterface;
 class BackgroundJob extends Model
 {
     /** @use HasFactory<BackgroundJobFactory> */
-    use HasFactory;
+    use HasFactory, Prunable;
 
     protected $table = 'background_jobs';
 
@@ -62,6 +66,7 @@ class BackgroundJob extends Model
         'status' => BackgroundJobStatus::Waiting->value,
         'children_succeeded' => 0,
         'children_failed' => 0,
+        'progress_processed' => 0,
     ];
 
     /**
@@ -100,6 +105,8 @@ class BackgroundJob extends Model
             'children_expected' => 'integer',
             'children_succeeded' => 'integer',
             'children_failed' => 'integer',
+            'progress_total' => 'integer',
+            'progress_processed' => 'integer',
             'sealed_at' => 'datetime',
             'finished_at' => 'datetime',
             'rolled_up_at' => 'datetime',
@@ -283,13 +290,62 @@ class BackgroundJob extends Model
         return $this->children_succeeded + $this->children_failed;
     }
 
+    /**
+     * The progress in percent. A run counts its settled children. A standalone
+     * job counts the progress that it reports with advanceProgress().
+     */
     public function progressPercentage(): int
     {
-        if (! $this->children_expected) {
-            return $this->status->hasFinishedRunning() ? 100 : 0;
+        if ($this->children_expected) {
+            return (int) floor(($this->settledChildren() / $this->children_expected) * 100);
         }
 
-        return (int) floor(($this->settledChildren() / $this->children_expected) * 100);
+        if ($this->progress_total) {
+            return (int) min(100, floor(($this->progress_processed / $this->progress_total) * 100));
+        }
+
+        return $this->status->hasFinishedRunning() ? 100 : 0;
+    }
+
+    /**
+     * Tells if the job reports its own progress.
+     */
+    public function hasProgress(): bool
+    {
+        return $this->progress_total !== null;
+    }
+
+    /**
+     * Set the number of items that the job will process.
+     */
+    public function setProgressTotal(?int $total): static
+    {
+        $this->update(['progress_total' => $total]);
+
+        return $this;
+    }
+
+    /**
+     * Add processed items to the progress. The database adds the number, so
+     * parallel workers do not lose an update.
+     */
+    public function advanceProgress(int $by = 1): static
+    {
+        if ($by === 0) {
+            return $this;
+        }
+
+        BackgroundJobs::table()
+            ->where('id', $this->getKey())
+            ->update([
+                'progress_processed' => BackgroundJobs::table()->raw('progress_processed + '.(int) $by),
+                'updated_at' => now(),
+            ]);
+
+        $this->progress_processed += $by;
+        $this->syncOriginalAttribute('progress_processed');
+
+        return $this;
     }
 
     /**
@@ -311,6 +367,8 @@ class BackgroundJob extends Model
 
     public function finish(): static
     {
+        $this->flushLog();
+
         $this->update([
             'status' => BackgroundJobStatus::Finished,
             'finished_at' => now(),
@@ -321,6 +379,8 @@ class BackgroundJob extends Model
 
     public function fail(?string $reason = null): static
     {
+        $this->flushLog();
+
         $this->update([
             'status' => BackgroundJobStatus::Failed,
             'finished_at' => now(),
@@ -473,23 +533,54 @@ class BackgroundJob extends Model
         $query->where($query->qualifyColumn('created_at'), '>=', now()->subHours(BackgroundJobs::staleAfterHours()));
     }
 
-    public function getLogPath(): string
+    /**
+     * A logger that writes to the log of this job. The log store in the config
+     * decides where the log is kept.
+     */
+    public function logChannel(): LoggerInterface
     {
-        return BackgroundJobs::logPath()."/{$this->getKey()}.log";
+        return BackgroundJobs::logs()->logger($this->getKey());
+    }
+
+    /**
+     * Write the buffered log entries of this job to the log store.
+     */
+    public function flushLog(): void
+    {
+        BackgroundJobs::logs()->flush($this->getKey());
     }
 
     public function hasLog(): bool
     {
-        return file_exists($this->getLogPath());
+        $this->flushLog();
+
+        return BackgroundJobs::logs()->store()->exists($this->getKey());
     }
 
+    /**
+     * The latest log entries, oldest first. The "logs.display_limit" config
+     * limits the number of entries when you do not give a limit.
+     *
+     * @param  string|null  $level  Only entries of this level, for example "error". The value "all" gives all levels.
+     * @return list<LogEntry>
+     */
+    public function logEntries(?string $level = null, ?int $limit = null): array
+    {
+        $this->flushLog();
+
+        return BackgroundJobs::logs()->store()->read(
+            jobId: $this->getKey(),
+            level: $level === 'all' ? null : $level,
+            limit: $limit ?? (int) config('background-jobs.logs.display_limit', 5000),
+        );
+    }
+
+    /**
+     * The latest log entries as text, one line for each entry.
+     */
     public function getLogContents(): string
     {
-        if (! $this->hasLog()) {
-            return '';
-        }
-
-        return (string) file_get_contents($this->getLogPath());
+        return $this->getLogContentsForLevel('all');
     }
 
     /**
@@ -498,28 +589,73 @@ class BackgroundJob extends Model
      */
     public function getLogContentsForLevel(string $level = 'all'): string
     {
-        $contents = $this->getLogContents();
-
-        if ($level === 'all' || $contents === '') {
-            return $contents;
-        }
-
-        $marker = '.'.strtoupper($level).':';
-
-        return collect(explode("\n", $contents))
-            ->filter(fn (string $line) => str_contains(strtoupper($line), $marker))
-            ->implode("\n");
+        return implode("\n", array_map(
+            fn (LogEntry $entry) => $entry->format(),
+            $this->logEntries(strtolower($level)),
+        ));
     }
 
     /**
-     * A logger that writes to the log file of this job.
+     * The file that the job uses, for example an upload that it imports. The
+     * package deletes the file when the job is finished or failed.
      */
-    public function logChannel(): LoggerInterface
+    public function temporaryFile(): ?TemporaryFile
     {
-        return Log::build([
-            'driver' => 'single',
-            'path' => $this->getLogPath(),
-        ]);
+        return TemporaryFile::fromMeta($this->meta);
+    }
+
+    /**
+     * Record the file that the job uses. Use a disk that all servers can read,
+     * so that any worker can process the job.
+     */
+    public function setTemporaryFile(string $path, ?string $disk = null): static
+    {
+        return $this->updateMetaItem('temporary_file', (new TemporaryFile($path, $disk))->toMeta());
+    }
+
+    /**
+     * The settled jobs that are older than the retention in the config. The
+     * query only finds roots. The database deletes the children of a run with
+     * the run.
+     *
+     * @return Builder<static>
+     */
+    public function prunable(): Builder
+    {
+        $days = config('background-jobs.retention.days');
+        $failedDays = config('background-jobs.retention.failed_days', $days);
+
+        $query = static::query()->roots()->withStatus(...BackgroundJobStatus::settled());
+
+        if ($days === null && $failedDays === null) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->where(function (Builder $query) use ($days, $failedDays) {
+            $query->when($days !== null, fn (Builder $query) => $query->orWhere(fn (Builder $query) => $query
+                ->where('status', '!=', BackgroundJobStatus::Failed)
+                ->where('created_at', '<', now()->subDays((int) $days))));
+
+            $query->when($failedDays !== null, fn (Builder $query) => $query->orWhere(fn (Builder $query) => $query
+                ->where('status', BackgroundJobStatus::Failed)
+                ->where('created_at', '<', now()->subDays((int) $failedDays))));
+        });
+    }
+
+    /**
+     * Delete the logs and the temporary files of the job and its children. A
+     * database log store also deletes the logs with the foreign key, but a
+     * file log store needs this step.
+     */
+    protected function pruning(): void
+    {
+        $store = BackgroundJobs::logs()->store();
+
+        foreach ([$this->getKey(), ...$this->children()->pluck('id')->all()] as $jobId) {
+            $store->delete($jobId);
+        }
+
+        $this->temporaryFile()?->delete();
     }
 
     public function updateMetaItem(string $key, mixed $value): static

@@ -2,13 +2,25 @@
 
 namespace Bernskiold\LaravelBackgroundJobs;
 
+use Bernskiold\LaravelBackgroundJobs\Console\FailStaleBackgroundJobsCommand;
+use Bernskiold\LaravelBackgroundJobs\Console\ImportFileLogsCommand;
 use Bernskiold\LaravelBackgroundJobs\Console\ReconcileBackgroundJobRunsCommand;
+use Bernskiold\LaravelBackgroundJobs\Contracts\BackgroundJobLogStore;
 use Bernskiold\LaravelBackgroundJobs\Events\BackgroundJobChangedStatus;
 use Bernskiold\LaravelBackgroundJobs\Listeners\NotifyOnFinish;
 use Bernskiold\LaravelBackgroundJobs\Listeners\RemoveTemporaryFile;
 use Bernskiold\LaravelBackgroundJobs\Listeners\RollUpParentBackgroundJob;
+use Bernskiold\LaravelBackgroundJobs\Logging\BackgroundJobLogs;
+use Bernskiold\LaravelBackgroundJobs\Logging\DatabaseLogStore;
+use Bernskiold\LaravelBackgroundJobs\Logging\FileLogStore;
+use Illuminate\Container\Container;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Foundation\Console\AboutCommand;
+use Illuminate\Queue\Events\JobExceptionOccurred;
+use Illuminate\Queue\Events\JobFailed;
+use Illuminate\Queue\Events\JobProcessed;
+use Illuminate\Queue\Events\JobTimedOut;
 use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -16,11 +28,23 @@ use Illuminate\Support\ServiceProvider;
 
 class LaravelBackgroundJobsServiceProvider extends ServiceProvider
 {
+    protected static bool $shutdownFlushRegistered = false;
+
     public function register(): void
     {
         $this->mergeConfigFrom(
             __DIR__.'/../config/background-jobs.php', 'background-jobs'
         );
+
+        $this->app->singleton(BackgroundJobLogStore::class, fn (Application $app) => $app->make(
+            match ($store = config('background-jobs.logs.store', 'database')) {
+                'database' => DatabaseLogStore::class,
+                'file' => FileLogStore::class,
+                default => $store,
+            }
+        ));
+
+        $this->app->singleton(BackgroundJobLogs::class);
     }
 
     public function boot(): void
@@ -32,16 +56,20 @@ class LaravelBackgroundJobsServiceProvider extends ServiceProvider
         ], 'background-jobs-config');
 
         $this->publishesMigrations([
-            __DIR__.'/../database/migrations/create_background_jobs_table.php.stub' => database_path('migrations/'.date('Y_m_d_His').'_create_background_jobs_table.php'),
+            __DIR__.'/../database/migrations/create_background_jobs_table.php.stub' => database_path('migrations/'.date('Y_m_d_His', time()).'_create_background_jobs_table.php'),
+            __DIR__.'/../database/migrations/create_background_job_logs_table.php.stub' => database_path('migrations/'.date('Y_m_d_His', time() + 1).'_create_background_job_logs_table.php'),
         ], 'background-jobs-migrations');
 
         if ($this->app->runningInConsole()) {
             $this->commands([
                 ReconcileBackgroundJobRunsCommand::class,
+                FailStaleBackgroundJobsCommand::class,
+                ImportFileLogsCommand::class,
             ]);
         }
 
         $this->registerListeners();
+        $this->registerLogFlushing();
         $this->registerBroadcastChannels();
     }
 
@@ -55,6 +83,45 @@ class LaravelBackgroundJobsServiceProvider extends ServiceProvider
         Event::listen(BackgroundJobChangedStatus::class, RemoveTemporaryFile::class);
         Event::listen(BackgroundJobChangedStatus::class, RollUpParentBackgroundJob::class);
         Event::listen(BackgroundJobChangedStatus::class, NotifyOnFinish::class);
+    }
+
+    /**
+     * The log entries wait in a buffer. Write them when a queued job ends, so
+     * that a long-running worker does not keep them, and when the process
+     * stops. The shutdown function also runs when the worker exits after a
+     * timeout or a fatal error, which is when the last entries matter most.
+     */
+    protected function registerLogFlushing(): void
+    {
+        $flush = function () {
+            if ($this->app->resolved(BackgroundJobLogs::class)) {
+                $this->app->make(BackgroundJobLogs::class)->flushAll();
+            }
+        };
+
+        Event::listen([JobProcessed::class, JobExceptionOccurred::class, JobFailed::class, JobTimedOut::class], $flush);
+
+        $this->app->terminating($flush);
+
+        if (static::$shutdownFlushRegistered) {
+            return;
+        }
+
+        static::$shutdownFlushRegistered = true;
+
+        // Registered one time for each process, and it resolves the current
+        // container. A test suite boots many applications in one process.
+        register_shutdown_function(static function () {
+            try {
+                $app = Container::getInstance();
+
+                if ($app->resolved(BackgroundJobLogs::class)) {
+                    $app->make(BackgroundJobLogs::class)->flushAll();
+                }
+            } catch (\Throwable) {
+                // The process is ending. There is nothing more to do.
+            }
+        });
     }
 
     /**

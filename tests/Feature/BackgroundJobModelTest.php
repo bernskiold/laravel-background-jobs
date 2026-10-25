@@ -271,7 +271,6 @@ describe('logs', function () {
         $job->logChannel()->error('Row 11 is broken.');
 
         expect($job->hasLog())->toBeTrue()
-            ->and($job->getLogPath())->toBe(BackgroundJobs::logPath()."/{$job->id}.log")
             ->and($job->getLogContents())->toContain('Read 10 rows.')
             ->and($job->getLogContentsForLevel('error'))->toContain('Row 11 is broken.')
             ->and($job->getLogContentsForLevel('error'))->not->toContain('Read 10 rows.')

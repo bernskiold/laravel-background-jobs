@@ -29,17 +29,53 @@ return [
     ],
 
     /*
-     * A job that is not finished after this number of hours is stale. The
-     * package then stops to show it as "still running", and a wait for it
-     * stops.
+     * A job that is waiting or processing and has had no update for this
+     * number of hours is stale. The "background-jobs:fail-stale" command then
+     * fails it. A status change, a log entry, a meta change and progress each
+     * update the job.
      */
     'stale_after_hours' => 6,
 
     /*
-     * Each job writes its log to a file of its own in this directory.
+     * The log of each job. The "database" store keeps the logs in a table, so
+     * that all servers can read them. Use the "file" store only when one server
+     * runs the web requests and the queue workers. You can also give the class
+     * of your own store, which implements the BackgroundJobLogStore contract.
      */
     'logs' => [
+
+        'store' => 'database',
+
+        // The connection and the table of the database store. Set a separate
+        // connection when jobs log in transactions that can roll back.
+        'connection' => null,
+        'table' => 'background_job_logs',
+
+        // The directory of the file store, and of the files to import with
+        // the "background-jobs:import-file-logs" command.
         'path' => storage_path('logs/background-jobs'),
+
+        // The package keeps log entries in a buffer and writes them in
+        // batches: when the buffer has this number of entries, when the oldest
+        // entry is this number of seconds old, at an error, and when the
+        // queued job ends.
+        'buffer_size' => 100,
+        'flush_interval' => 2,
+
+        // The maximum number of entries that a job page shows.
+        'display_limit' => 5000,
+
+    ],
+
+    /*
+     * How long to keep settled jobs, in days. "days" applies to finished jobs
+     * and "failed_days" to failed jobs. Set a value to null to keep those jobs
+     * forever. Schedule "model:prune" for your model to delete the old jobs.
+     * The children, the logs and the temporary files of a job go with it.
+     */
+    'retention' => [
+        'days' => null,
+        'failed_days' => null,
     ],
 
     /*
@@ -76,8 +112,8 @@ return [
     ],
 
     /*
-     * When a job is finished or failed, the package deletes the local file in
-     * the "file_path" item of its meta.
+     * When a job is finished or failed, the package deletes the temporary file
+     * of the job. See BackgroundJob::setTemporaryFile().
      */
     'remove_temporary_files' => true,
 

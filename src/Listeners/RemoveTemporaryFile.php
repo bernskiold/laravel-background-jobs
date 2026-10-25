@@ -4,23 +4,22 @@ namespace Bernskiold\LaravelBackgroundJobs\Listeners;
 
 use Bernskiold\LaravelBackgroundJobs\BackgroundJobs;
 use Bernskiold\LaravelBackgroundJobs\Events\BackgroundJobChangedStatus;
-use Bernskiold\LaravelBackgroundJobs\Models\BackgroundJob;
+use Bernskiold\LaravelBackgroundJobs\Support\TemporaryFile;
 use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Support\Facades\File;
 
 /**
- * Deletes the local file in the "file_path" item of the meta when the job is
- * finished or failed. An upload that a job imports is an example.
+ * Deletes the temporary file of a job when the job is finished or failed. An
+ * upload that a job imports is an example.
+ *
+ * A file on a shared disk can be deleted from any server. A local file path
+ * from an earlier version is only deleted when this listener runs on the
+ * server that has the file.
  */
 class RemoveTemporaryFile implements ShouldQueue
 {
     public function handle(BackgroundJobChangedStatus $event): void
     {
-        $path = $this->filePath($event);
-
-        if ($path !== null) {
-            File::delete($path);
-        }
+        $this->file($event)?->delete();
     }
 
     public function shouldQueue(BackgroundJobChangedStatus $event): bool
@@ -29,16 +28,11 @@ class RemoveTemporaryFile implements ShouldQueue
             return false;
         }
 
-        return $event->to->hasFinishedRunning() && $this->filePath($event) !== null;
+        return $event->to->hasFinishedRunning() && $this->file($event) !== null;
     }
 
-    protected function filePath(BackgroundJobChangedStatus $event): ?string
+    protected function file(BackgroundJobChangedStatus $event): ?TemporaryFile
     {
-        /** @var BackgroundJob|null $job */
-        $job = BackgroundJobs::model()::query()->find($event->backgroundJobId);
-
-        $path = $job?->meta['file_path'] ?? null;
-
-        return is_string($path) && $path !== '' ? $path : null;
+        return BackgroundJobs::model()::query()->find($event->backgroundJobId)?->temporaryFile();
     }
 }

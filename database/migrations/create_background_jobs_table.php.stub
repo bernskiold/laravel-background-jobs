@@ -32,6 +32,10 @@ return new class extends Migration
             $table->unsignedInteger('children_failed')->default(0);
             $table->timestamp('sealed_at')->nullable();
 
+            // The progress of a standalone job. A run counts its children.
+            $table->unsignedInteger('progress_total')->nullable();
+            $table->unsignedInteger('progress_processed')->default(0);
+
             $table->dateTime('finished_at')->nullable();
 
             // The roll-up sets this column on a child when it counts the child
@@ -42,6 +46,7 @@ return new class extends Migration
 
             $table->index(['parent_id', 'status']);
             $table->index(['jobable_type', 'type', 'status']);
+            $table->index(['status', 'updated_at']);
         });
     }
 
