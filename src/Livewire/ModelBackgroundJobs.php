@@ -90,6 +90,8 @@ abstract class ModelBackgroundJobs extends Component
             'type',
             'status',
             'failure_reason',
+            'progress_total',
+            'progress_processed',
             'finished_at',
             'created_at',
         ];

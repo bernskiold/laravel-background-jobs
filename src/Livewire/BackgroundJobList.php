@@ -104,6 +104,8 @@ abstract class BackgroundJobList extends Component
             'type',
             'status',
             'failure_reason',
+            'progress_total',
+            'progress_processed',
             'children_expected',
             'children_succeeded',
             'children_failed',

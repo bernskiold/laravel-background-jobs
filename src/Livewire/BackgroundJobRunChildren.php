@@ -117,6 +117,8 @@ abstract class BackgroundJobRunChildren extends Component
             'type',
             'status',
             'failure_reason',
+            'progress_total',
+            'progress_processed',
             'meta',
             'finished_at',
             'created_at',
