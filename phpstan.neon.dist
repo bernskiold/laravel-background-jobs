@@ -1,0 +1,15 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    paths:
+        - src
+        - database/factories
+
+    level: 6
+
+    tmpDir: build/phpstan
+
+    ignoreErrors:
+        # The host application uses the trait on its models. The package does not.
+        - identifier: trait.unused

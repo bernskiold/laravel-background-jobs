@@ -1,0 +1,37 @@
+name: Fix PHP code style issues
+
+on:
+    push:
+        paths:
+            - "**.php"
+
+permissions:
+    contents: write
+
+jobs:
+    php-code-styling:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v6
+              with:
+                  ref: ${{ github.head_ref }}
+
+            - name: Setup PHP
+              uses: shivammathur/setup-php@v2
+              with:
+                  php-version: "8.4"
+                  extensions: dom, curl, libxml, mbstring, zip
+                  coverage: none
+
+            - name: Install Composer dependencies
+              run: composer install --prefer-dist --no-interaction --no-progress
+
+            - name: Fix PHP code style issues
+              run: vendor/bin/pint
+
+            - name: Commit changes
+              uses: stefanzweifel/git-auto-commit-action@v7
+              with:
+                  commit_message: "Fix styling"
