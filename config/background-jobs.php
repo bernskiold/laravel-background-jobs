@@ -68,14 +68,27 @@ return [
     ],
 
     /*
-     * How long to keep settled jobs, in days. "days" applies to finished jobs
-     * and "failed_days" to failed jobs. Set a value to null to keep those jobs
-     * forever. Schedule "model:prune" for your model to delete the old jobs.
-     * The children, the logs and the temporary files of a job go with it.
+     * How long to keep settled jobs and their logs, in days. Set a value to
+     * null to keep those jobs or logs forever. Running jobs are never pruned.
+     *
+     * "days" applies to finished jobs and "failed_days" to failed jobs.
+     * Schedule "model:prune" for your model to delete the old jobs. The
+     * children, the logs and the temporary files of a job go with it.
+     *
+     * "logs" deletes only the logs, and keeps the jobs. Use it to keep the
+     * history of the jobs longer than their logs. Schedule the
+     * "background-jobs:prune-logs" command for it.
      */
     'retention' => [
+
         'days' => null,
         'failed_days' => null,
+
+        'logs' => [
+            'days' => null,
+            'failed_days' => null,
+        ],
+
     ],
 
     /*

@@ -72,6 +72,15 @@ class DatabaseLogStore implements BackgroundJobLogStore
         $this->query()->where('background_job_id', $jobId)->delete();
     }
 
+    public function deleteForJobs(array $jobIds): void
+    {
+        if ($jobIds === []) {
+            return;
+        }
+
+        $this->query()->whereIn('background_job_id', $jobIds)->delete();
+    }
+
     protected function query(): Builder
     {
         $connection = config('background-jobs.logs.connection')

@@ -28,7 +28,7 @@ When the job is finished or failed, the owner gets an email.
 - **Ready for many servers.** Temporary files are on a filesystem disk, and the logs are in the database. Any worker can process a job, and any web server can show it.
 - **Status that stays true.** A job middleware keeps the status in step with the queued job, and a command fails the jobs whose worker stopped.
 - **Progress.** Runs count their children. A standalone job can report its own progress.
-- **Retention.** Old jobs, their logs and their files are pruned with `model:prune`.
+- **Retention.** Old jobs and old logs are pruned separately, with their own retention.
 - **Notifications.** The owner gets an email when a job or a run is finished or failed.
 - **Live updates.** Each status change broadcasts. A page can refresh when a job changes.
 - **Headless Livewire components.** Base components give the behavior of the job pages. You supply the views.
@@ -441,21 +441,29 @@ Schedule::command('background-jobs:reconcile-runs')->everyFifteenMinutes()->with
 
 ## Retention
 
-Set the retention in days, and schedule `model:prune` for your model:
+You can keep the jobs and their logs for different lengths of time. All values are in days. A value of `null` keeps those jobs or logs forever. Running jobs and their logs are never deleted.
 
 ```php
 // config/background-jobs.php
 'retention' => [
-    'days' => 90,          // finished jobs
-    'failed_days' => 365,  // failed jobs
+    'days' => 365,          // finished jobs
+    'failed_days' => 730,   // failed jobs
+
+    'logs' => [
+        'days' => 30,        // the logs of finished jobs
+        'failed_days' => 180, // the logs of failed jobs
+    ],
 ],
 ```
 
+Schedule the commands for the parts that you use:
+
 ```php
 Schedule::command('model:prune', ['--model' => [App\Models\BackgroundJob::class]])->daily();
+Schedule::command('background-jobs:prune-logs')->daily();
 ```
 
-The command deletes settled jobs that are older than the retention, with their children, their logs and their temporary files. A value of `null` keeps those jobs forever. Running jobs are never deleted.
+`model:prune` deletes settled jobs that are older than the job retention, with their children, their logs and their temporary files. `background-jobs:prune-logs` deletes only the logs of settled jobs that are older than the log retention, and keeps the jobs. It uses the status and the age of each job, also of each child of a run.
 
 ## Testing
 

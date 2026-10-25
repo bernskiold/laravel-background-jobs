@@ -29,4 +29,11 @@ interface BackgroundJobLogStore
     public function exists(int|string $jobId): bool;
 
     public function delete(int|string $jobId): void;
+
+    /**
+     * Delete the logs of many jobs.
+     *
+     * @param  list<int|string>  $jobIds
+     */
+    public function deleteForJobs(array $jobIds): void;
 }

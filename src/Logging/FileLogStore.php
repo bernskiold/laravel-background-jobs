@@ -61,6 +61,13 @@ class FileLogStore implements BackgroundJobLogStore
         File::delete($this->path($jobId));
     }
 
+    public function deleteForJobs(array $jobIds): void
+    {
+        foreach ($jobIds as $jobId) {
+            $this->delete($jobId);
+        }
+    }
+
     public function path(int|string $jobId): string
     {
         return BackgroundJobs::logPath()."/{$jobId}.log";

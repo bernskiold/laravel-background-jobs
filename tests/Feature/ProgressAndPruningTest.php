@@ -109,3 +109,86 @@ describe('pruning', function () {
         expect(File::exists(BackgroundJobs::logPath()."/{$job->id}.log"))->toBeFalse();
     });
 });
+
+describe('log retention', function () {
+    beforeEach(function () {
+        $this->logged = function (BackgroundJob $job, string $message = 'A line.'): BackgroundJob {
+            $job->logChannel()->info($message);
+            $job->flushLog();
+
+            return $job;
+        };
+    });
+
+    it('deletes nothing when there is no log retention', function () {
+        ($this->logged)(BackgroundJob::factory()->finished()->create(['created_at' => now()->subYears(5)]));
+
+        $this->artisan('background-jobs:prune-logs')
+            ->expectsOutputToContain('There is no log retention.')
+            ->assertSuccessful();
+
+        expect(DB::table('background_job_logs')->count())->toBe(1);
+    });
+
+    it('deletes old logs and keeps the jobs', function () {
+        config(['background-jobs.retention.logs.days' => 30, 'background-jobs.retention.logs.failed_days' => 90]);
+
+        $oldFinished = ($this->logged)(BackgroundJob::factory()->finished()->create(['created_at' => now()->subDays(31)]));
+        $recentFinished = ($this->logged)(BackgroundJob::factory()->finished()->create(['created_at' => now()->subDays(29)]));
+        $oldFailed = ($this->logged)(BackgroundJob::factory()->failed()->create(['created_at' => now()->subDays(31)]));
+        $ancientFailed = ($this->logged)(BackgroundJob::factory()->failed()->create(['created_at' => now()->subDays(91)]));
+        $running = ($this->logged)(BackgroundJob::factory()->processing()->create(['created_at' => now()->subDays(31)]));
+
+        $this->artisan('background-jobs:prune-logs')
+            ->expectsOutputToContain('Deleted the logs of 2 job(s).')
+            ->assertSuccessful();
+
+        expect(BackgroundJob::query()->count())->toBe(5)
+            ->and($oldFinished->hasLog())->toBeFalse()
+            ->and($ancientFailed->hasLog())->toBeFalse()
+            ->and($recentFinished->hasLog())->toBeTrue()
+            ->and($oldFailed->hasLog())->toBeTrue()
+            ->and($running->hasLog())->toBeTrue();
+    });
+
+    it('prunes the logs of children by their own status and age', function () {
+        config(['background-jobs.retention.logs.days' => 30]);
+
+        $run = BackgroundJob::factory()->processing()->create(['created_at' => now()->subDays(31)]);
+        $child = ($this->logged)(BackgroundJob::factory()->childOf($run)->finished()->create(['created_at' => now()->subDays(31)]));
+
+        $this->artisan('background-jobs:prune-logs')->assertSuccessful();
+
+        expect($child->hasLog())->toBeFalse();
+    });
+
+    it('keeps the jobs longer than their logs', function () {
+        config([
+            'background-jobs.retention.days' => 365,
+            'background-jobs.retention.logs.days' => 30,
+        ]);
+
+        $job = ($this->logged)(BackgroundJob::factory()->finished()->create(['created_at' => now()->subDays(60)]));
+
+        $this->artisan('model:prune', ['--model' => BackgroundJob::class])->assertSuccessful();
+        $this->artisan('background-jobs:prune-logs')->assertSuccessful();
+
+        expect(BackgroundJob::query()->whereKey($job->id)->exists())->toBeTrue()
+            ->and($job->hasLog())->toBeFalse();
+    });
+
+    it('deletes the log files of the file store', function () {
+        config([
+            'background-jobs.retention.logs.days' => 30,
+            'background-jobs.logs.store' => 'file',
+        ]);
+        app()->forgetInstance(BackgroundJobLogStore::class);
+        app()->forgetInstance(BackgroundJobLogs::class);
+
+        $job = ($this->logged)(BackgroundJob::factory()->finished()->create(['created_at' => now()->subDays(31)]));
+
+        $this->artisan('background-jobs:prune-logs')->assertSuccessful();
+
+        expect(File::exists(BackgroundJobs::logPath()."/{$job->id}.log"))->toBeFalse();
+    });
+});

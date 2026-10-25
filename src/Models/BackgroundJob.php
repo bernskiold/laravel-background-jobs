@@ -622,23 +622,39 @@ class BackgroundJob extends Model
      */
     public function prunable(): Builder
     {
-        $days = config('background-jobs.retention.days');
-        $failedDays = config('background-jobs.retention.failed_days', $days);
+        return static::query()
+            ->roots()
+            ->olderThanRetention(
+                config('background-jobs.retention.days'),
+                config('background-jobs.retention.failed_days'),
+            );
+    }
 
-        $query = static::query()->roots()->withStatus(...BackgroundJobStatus::settled());
+    /**
+     * Settled jobs that were created before the retention. "days" applies to
+     * finished jobs and "failedDays" to failed jobs. A null value keeps those
+     * jobs. With two null values, the query finds nothing.
+     *
+     * @param  Builder<static>  $query
+     */
+    public function scopeOlderThanRetention(Builder $query, int|string|null $days, int|string|null $failedDays): void
+    {
+        $query->withStatus(...BackgroundJobStatus::settled());
 
         if ($days === null && $failedDays === null) {
-            return $query->whereRaw('1 = 0');
+            $query->whereRaw('1 = 0');
+
+            return;
         }
 
-        return $query->where(function (Builder $query) use ($days, $failedDays) {
+        $query->where(function (Builder $query) use ($days, $failedDays) {
             $query->when($days !== null, fn (Builder $query) => $query->orWhere(fn (Builder $query) => $query
-                ->where('status', '!=', BackgroundJobStatus::Failed)
-                ->where('created_at', '<', now()->subDays((int) $days))));
+                ->where($query->qualifyColumn('status'), '!=', BackgroundJobStatus::Failed)
+                ->where($query->qualifyColumn('created_at'), '<', now()->subDays((int) $days))));
 
             $query->when($failedDays !== null, fn (Builder $query) => $query->orWhere(fn (Builder $query) => $query
-                ->where('status', BackgroundJobStatus::Failed)
-                ->where('created_at', '<', now()->subDays((int) $failedDays))));
+                ->where($query->qualifyColumn('status'), BackgroundJobStatus::Failed)
+                ->where($query->qualifyColumn('created_at'), '<', now()->subDays((int) $failedDays))));
         });
     }
 

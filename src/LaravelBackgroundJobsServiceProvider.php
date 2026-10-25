@@ -4,6 +4,7 @@ namespace Bernskiold\LaravelBackgroundJobs;
 
 use Bernskiold\LaravelBackgroundJobs\Console\FailStaleBackgroundJobsCommand;
 use Bernskiold\LaravelBackgroundJobs\Console\ImportFileLogsCommand;
+use Bernskiold\LaravelBackgroundJobs\Console\PruneBackgroundJobLogsCommand;
 use Bernskiold\LaravelBackgroundJobs\Console\ReconcileBackgroundJobRunsCommand;
 use Bernskiold\LaravelBackgroundJobs\Contracts\BackgroundJobLogStore;
 use Bernskiold\LaravelBackgroundJobs\Events\BackgroundJobChangedStatus;
@@ -65,6 +66,7 @@ class LaravelBackgroundJobsServiceProvider extends ServiceProvider
                 ReconcileBackgroundJobRunsCommand::class,
                 FailStaleBackgroundJobsCommand::class,
                 ImportFileLogsCommand::class,
+                PruneBackgroundJobLogsCommand::class,
             ]);
         }
 
