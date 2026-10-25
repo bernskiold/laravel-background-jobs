@@ -46,11 +46,9 @@ class TrackBackgroundJob
         }
 
         if ($backgroundJob->status === BackgroundJobStatus::Failed) {
+            // Return without the job, as SkipIfBatchCancelled does. The queue
+            // then counts the job as done, and a chain or a batch goes on.
             $backgroundJob->logChannel()->info('Skipped '.class_basename($job).', because the background job has failed.');
-
-            if (method_exists($job, 'delete')) {
-                $job->delete();
-            }
 
             return null;
         }
