@@ -6,6 +6,7 @@ use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use League\Flysystem\Local\LocalFilesystemAdapter;
 use RuntimeException;
 
@@ -77,8 +78,9 @@ final class TemporaryFile
 
     /**
      * A local path to the file, for code that can only read local files. A
-     * file on a remote disk is downloaded to the temporary directory one time.
-     * Call cleanUp() to delete that copy.
+     * file on a remote disk is downloaded one time, to the directory in the
+     * "temporary_files.local_directory" config. Call cleanUp() to delete that
+     * copy.
      *
      * @throws RuntimeException When the file does not exist.
      */
@@ -104,8 +106,11 @@ final class TemporaryFile
             throw new RuntimeException("The temporary file [{$this->path}] does not exist on the [{$this->disk}] disk.");
         }
 
+        $directory = rtrim((string) (config('background-jobs.temporary_files.local_directory') ?: sys_get_temp_dir()), '/');
+        File::ensureDirectoryExists($directory);
+
         $extension = pathinfo($this->path, PATHINFO_EXTENSION);
-        $localCopy = tempnam(sys_get_temp_dir(), 'background-job-').($extension !== '' ? ".{$extension}" : '');
+        $localCopy = $directory.'/'.Str::uuid().($extension !== '' ? ".{$extension}" : '');
 
         file_put_contents($localCopy, $stream);
 

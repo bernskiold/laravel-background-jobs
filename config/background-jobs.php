@@ -117,4 +117,13 @@ return [
      */
     'remove_temporary_files' => true,
 
+    'temporary_files' => [
+
+        // TemporaryFile::localPath() downloads a file from a remote disk to
+        // this directory. Set null to use the temporary directory of the
+        // system. Large imports can need more space than that.
+        'local_directory' => null,
+
+    ],
+
 ];

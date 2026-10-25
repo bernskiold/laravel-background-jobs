@@ -73,6 +73,18 @@ it('downloads a file from a remote disk one time', function () {
         ->and(Storage::disk('remote')->exists('uploads/q3.csv'))->toBeTrue();
 });
 
+it('downloads to the configured directory', function () {
+    $directory = sys_get_temp_dir().'/background-job-downloads';
+    config(['background-jobs.temporary_files.local_directory' => $directory]);
+    Storage::disk('remote')->put('uploads/q3.csv', 'a,b');
+
+    $file = new TemporaryFile('uploads/q3.csv', 'remote');
+
+    expect($file->localPath())->toStartWith($directory.'/');
+
+    $file->cleanUp();
+});
+
 it('says when a remote file does not exist', function () {
     (new TemporaryFile('missing.csv', 'remote'))->localPath();
 })->throws(RuntimeException::class);
