@@ -1,7 +1,9 @@
 # Track queued work as background jobs
 
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/bernskiold/laravel-background-jobs.svg?style=flat-square)](https://packagist.org/packages/bernskiold/laravel-background-jobs)
 [![GitHub Tests Action Status](https://img.shields.io/github/actions/workflow/status/bernskiold/laravel-background-jobs/run-tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/bernskiold/laravel-background-jobs/actions?query=workflow%3Arun-tests+branch%3Amain)
 [![GitHub Code Style Action Status](https://img.shields.io/github/actions/workflow/status/bernskiold/laravel-background-jobs/fix-php-code-style-issues.yml?branch=main&label=code%20style&style=flat-square)](https://github.com/bernskiold/laravel-background-jobs/actions?query=workflow%3A"Fix+PHP+code+style+issues"+branch%3Amain)
+[![Total Downloads](https://img.shields.io/packagist/dt/bernskiold/laravel-background-jobs.svg?style=flat-square)](https://packagist.org/packages/bernskiold/laravel-background-jobs)
 
 A queued job runs out of sight. The person who started it does not know if it is still running, if it is finished, or why it failed. This package records each unit of work as a background job in the database. The job has a type, a status, an owner, a log file and a meta field.
 
@@ -31,7 +33,7 @@ When the job is finished or failed, the owner gets an email.
 - **Retention.** Old jobs and old logs are pruned separately, with their own retention.
 - **Notifications.** The owner gets an email when a job or a run is finished or failed.
 - **Live updates.** Each status change broadcasts. A page can refresh when a job changes.
-- **Headless Livewire components.** Base components give the behavior of the job pages. You supply the views.
+- **Headless.** The package has no views, routes or front-end code. It gives the scopes, the authorization abilities and the broadcast events that a user interface needs, so you can build the job pages with any stack.
 - **A safety net.** A command finds runs that cannot settle on their own, and settles them.
 
 ## Installation
@@ -131,8 +133,8 @@ $job->logChannel()->info('Read 1 200 rows.');
 $job->logChannel()->error('Row 1 201 is broken.', ['row' => 1201]);
 
 $job->logEntries();                 // the latest entries, as LogEntry objects
-$job->getLogContents();             // the latest entries, as text
-$job->getLogContentsForLevel('error');
+$job->logText();                    // the latest entries, as text
+$job->logText('error');             // only the errors
 ```
 
 The `logs.store` config decides where the logs are kept:
@@ -313,7 +315,8 @@ BackgroundJob::query()->roots();             // no children of runs
 BackgroundJob::query()->forParents($run);    // the children of a run
 BackgroundJob::query()->mine();              // the jobs of the logged-in user
 BackgroundJob::query()->notFinished();       // waiting or processing
-BackgroundJob::query()->startedRecently();   // in the stale window
+BackgroundJob::query()->notStale();          // had an update in the stale window
+BackgroundJob::query()->stale();             // running, but no update in the stale window
 ```
 
 ## Your own model
@@ -362,13 +365,13 @@ The owner only gets an email when the owner can still `view` the job. When your 
 
 ## Notifications
 
-The owner gets one of these notifications:
+By default, the owner gets one of these notifications:
 
 - `BackgroundJobSucceeded` when a job is finished.
 - `BackgroundJobFailed` when a job failed.
 - `BackgroundJobRunCompleted` when a run is settled.
 
-The children of a run do not send notifications. Set the queue, the channels and the classes in the config:
+The children of a run do not send notifications. Set the queue, the channels and the default classes in the config. Set a class to `null` to send nothing for that outcome:
 
 ```php
 'notifications' => [
@@ -379,6 +382,49 @@ The children of a run do not send notifications. Set the queue, the channels and
     'failed' => BackgroundJobFailed::class,
     'run_completed' => BackgroundJobRunCompleted::class,
 ],
+```
+
+### Choose the notifications for a job type
+
+A job type can choose its own notifications. Implement `ChoosesBackgroundJobNotifications` on the enum. Return a notification to send it, `false` to send nothing, or `null` to use the config:
+
+```php
+use Bernskiold\LaravelBackgroundJobs\Contracts\ChoosesBackgroundJobNotifications;
+use Bernskiold\LaravelBackgroundJobs\Enums\BackgroundJobOutcome;
+
+enum JobType: string implements BackgroundJobType, ChoosesBackgroundJobNotifications
+{
+    case ImportReports = 'import_reports';
+    case NightlySync = 'nightly_sync';
+
+    public function notificationFor(BackgroundJobOutcome $outcome, BackgroundJob $job): Notification|false|null
+    {
+        return match (true) {
+            // Nobody waits for the nightly sync. Only tell the owner when it fails.
+            $this === self::NightlySync && $outcome === BackgroundJobOutcome::Succeeded => false,
+            $this === self::NightlySync => new NightlySyncFailed($job),
+            default => null,
+        };
+    }
+
+    // ...
+}
+```
+
+The outcome is `Succeeded`, `Failed` or `RunCompleted`.
+
+### Choose in the application
+
+A callback in a service provider comes before the job type and the config. It has the same return values:
+
+```php
+BackgroundJobs::chooseNotificationUsing(function (BackgroundJob $job, BackgroundJobOutcome $outcome) {
+    if ($job->meta['silent'] ?? false) {
+        return false;
+    }
+
+    return null;
+});
 ```
 
 ## Broadcasting
@@ -401,30 +447,43 @@ Echo.private('background-job-changes').listen('.background-job.status-changed', 
 
 The package authorizes the channels with the abilities above. To authorize them in your own `routes/channels.php` file, set `broadcasting.register_channels` to `false`.
 
-## Livewire components
+## Build a user interface
 
-The package has no views. It gives abstract Livewire components with the behavior. You extend them and supply the views:
+The package has no views, routes or components. These parts give a job page what it needs, whatever your front-end stack is.
 
-| Component | Use |
-| --- | --- |
-| `BackgroundJobList` | The list of jobs, with a filter for the children of runs. |
-| `BackgroundJobDetail` | The page of one job, with a log filter and "mark as failed". |
-| `BackgroundJobRunChildren` | The jobs of a run, with a status filter. |
-| `ModelBackgroundJobs` | The jobs of one model. |
+**Queries.** A list of jobs for a user:
 
 ```php
-use Bernskiold\LaravelBackgroundJobs\Livewire\BackgroundJobList;
-
-class BackgroundJobs extends BackgroundJobList
-{
-    public function render(): View
-    {
-        return view('livewire.background-jobs.index');
-    }
-}
+BackgroundJob::query()
+    ->unless($user->can('viewAllJobs', BackgroundJob::class), fn ($query) => $query->mine())
+    ->roots()                 // leave out the children of runs
+    ->with('user')
+    ->latest()
+    ->paginate();
 ```
 
-The components refresh when a job changes. Override `query()`, `columns()` or the ability methods to change their behavior.
+The jobs of a run, with a status filter: `->forParents($run)->failed()`. The jobs of a model: `->forModel($report)`. The log of a job: `$job->logText('error')` or `$job->logEntries('error')`.
+
+**Display.** `$job->typeLabel()`, `$job->status->label()`, `$job->label()`, `$job->jobableLabel()`, `$job->progressPercentage()` and `$job->url()`.
+
+**Actions.** To mark a job as failed, check the update ability and call `fail()`:
+
+```php
+Gate::authorize($job->updateAbility(), $job);
+
+$job->fail('Manually failed by '.$user->name);
+```
+
+**Live updates.** Listen to the broadcast channels in the [Broadcasting](#broadcasting) section. `BackgroundJobChangedStatus::jobChannel($id)`, `runChannel($id)`, `listChannel()` and `BROADCAST_NAME` give the names. For example, in a Livewire component:
+
+```php
+public function getListeners(): array
+{
+    return [
+        'echo-private:'.BackgroundJobChangedStatus::listChannel().',.'.BackgroundJobChangedStatus::BROADCAST_NAME => '$refresh',
+    ];
+}
+```
 
 ## Stale jobs and the safety net
 

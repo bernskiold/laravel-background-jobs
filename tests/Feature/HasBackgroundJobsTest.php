@@ -28,7 +28,7 @@ it('does not count a finished or stale job', function () {
     BackgroundJob::generateFor($this->report, JobType::ImportReports)->finish();
     BackgroundJob::factory()->for($this->report, 'jobable')->processing()->create([
         'type' => JobType::ExportReports,
-        'created_at' => now()->subDay(),
+        'updated_at' => now()->subDay(),
     ]);
 
     expect($this->report->hasUnfinishedBackgroundJob(JobType::ImportReports))->toBeFalse()

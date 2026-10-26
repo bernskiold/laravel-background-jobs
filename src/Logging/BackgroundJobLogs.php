@@ -71,6 +71,8 @@ class BackgroundJobLogs
     }
 
     /**
+     * @internal The buffered handler calls this method.
+     *
      * Write entries to the store. Each write also updates "updated_at" of the
      * job. A job that writes to its log thus shows that it is still alive.
      *

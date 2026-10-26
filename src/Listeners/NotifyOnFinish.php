@@ -3,6 +3,7 @@
 namespace Bernskiold\LaravelBackgroundJobs\Listeners;
 
 use Bernskiold\LaravelBackgroundJobs\BackgroundJobs;
+use Bernskiold\LaravelBackgroundJobs\Enums\BackgroundJobOutcome;
 use Bernskiold\LaravelBackgroundJobs\Enums\BackgroundJobStatus;
 use Bernskiold\LaravelBackgroundJobs\Events\BackgroundJobChangedStatus;
 use Bernskiold\LaravelBackgroundJobs\Models\BackgroundJob;
@@ -15,7 +16,8 @@ use Illuminate\Support\Facades\Gate;
  *
  * A run sends one notification for all of its children. The children of a run
  * do not send notifications. A job without an owner does not send a
- * notification.
+ * notification. See BackgroundJobs::notificationFor() for how the notification
+ * is chosen.
  */
 class NotifyOnFinish implements ShouldQueue
 {
@@ -28,17 +30,11 @@ class NotifyOnFinish implements ShouldQueue
             return;
         }
 
-        $notification = match (true) {
-            $job->isRun() => config('background-jobs.notifications.run_completed'),
-            $job->status === BackgroundJobStatus::Failed => config('background-jobs.notifications.failed'),
-            default => config('background-jobs.notifications.succeeded'),
-        };
+        $notification = BackgroundJobs::notificationFor($job, $this->outcome($job));
 
-        if ($notification === null) {
-            return;
+        if ($notification !== null) {
+            $user->notify($notification);
         }
-
-        $user->notify(new $notification($job));
     }
 
     public function shouldQueue(BackgroundJobChangedStatus $event): bool
@@ -57,7 +53,20 @@ class NotifyOnFinish implements ShouldQueue
             return false;
         }
 
+        if (BackgroundJobs::notificationFor($job, $this->outcome($job)) === null) {
+            return false;
+        }
+
         return $this->userCanView($job);
+    }
+
+    protected function outcome(BackgroundJob $job): BackgroundJobOutcome
+    {
+        return match (true) {
+            $job->isRun() => BackgroundJobOutcome::RunCompleted,
+            $job->status === BackgroundJobStatus::Failed => BackgroundJobOutcome::Failed,
+            default => BackgroundJobOutcome::Succeeded,
+        };
     }
 
     protected function find(BackgroundJobChangedStatus $event): ?BackgroundJob

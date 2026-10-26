@@ -219,5 +219,5 @@ it('records skipped items in the meta and the log', function () {
 
     expect($run->job->refresh()->meta['skipped'])->toBe([
         ['report' => 7, 'reason' => 'No data available'],
-    ])->and($run->job->getLogContents())->toContain('Skipped: No data available');
+    ])->and($run->job->logText())->toContain('Skipped: No data available');
 });

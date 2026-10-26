@@ -226,11 +226,14 @@ describe('status scopes', function () {
         expect(BackgroundJob::query()->ownedBy($this->owner)->notFinished()->pluck('id')->all())->toBe([$mine->id]);
     });
 
-    it('ignores stale jobs', function () {
-        BackgroundJob::factory()->processing()->create(['created_at' => now()->subHours(7)]);
-        $recent = BackgroundJob::factory()->processing()->create();
+    it('tells stale jobs apart by their last update', function () {
+        $stale = BackgroundJob::factory()->processing()->create(['updated_at' => now()->subHours(7)]);
+        $alive = BackgroundJob::factory()->processing()->create(['created_at' => now()->subDays(2)]);
+        BackgroundJob::factory()->finished()->create(['updated_at' => now()->subHours(7)]);
 
-        expect(BackgroundJob::query()->startedRecently()->pluck('id')->all())->toBe([$recent->id]);
+        expect(BackgroundJob::query()->notFinished()->notStale()->pluck('id')->all())->toBe([$alive->id])
+            ->and(BackgroundJob::query()->stale()->pluck('id')->all())->toBe([$stale->id])
+            ->and(BackgroundJob::query()->stale(hours: 48)->pluck('id')->all())->toBe([]);
     });
 });
 
@@ -265,16 +268,16 @@ describe('logs', function () {
         $job = BackgroundJob::factory()->create();
 
         expect($job->hasLog())->toBeFalse()
-            ->and($job->getLogContents())->toBe('');
+            ->and($job->logText())->toBe('');
 
         $job->logChannel()->info('Read 10 rows.');
         $job->logChannel()->error('Row 11 is broken.');
 
         expect($job->hasLog())->toBeTrue()
-            ->and($job->getLogContents())->toContain('Read 10 rows.')
-            ->and($job->getLogContentsForLevel('error'))->toContain('Row 11 is broken.')
-            ->and($job->getLogContentsForLevel('error'))->not->toContain('Read 10 rows.')
-            ->and($job->getLogContentsForLevel('all'))->toContain('Read 10 rows.');
+            ->and($job->logText())->toContain('Read 10 rows.')
+            ->and($job->logText('error'))->toContain('Row 11 is broken.')
+            ->and($job->logText('error'))->not->toContain('Read 10 rows.')
+            ->and($job->logText('all'))->toContain('Read 10 rows.');
     });
 });
 

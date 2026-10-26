@@ -52,7 +52,7 @@ describe('the database store', function () {
         $job->logChannel()->info('Read 10 rows.');
         $job->logChannel()->error('Row 11 is broken.');
 
-        expect($job->getLogContentsForLevel('error'))->toContain('ERROR: Row 11 is broken.')
+        expect($job->logText('error'))->toContain('ERROR: Row 11 is broken.')
             ->not->toContain('Read 10 rows.');
     });
 
@@ -150,8 +150,8 @@ describe('the file store', function () {
         expect(app(BackgroundJobLogStore::class))->toBeInstanceOf(FileLogStore::class)
             ->and(File::exists(BackgroundJobs::logPath()."/{$job->id}.log"))->toBeTrue()
             ->and($job->hasLog())->toBeTrue()
-            ->and($job->getLogContentsForLevel('error'))->toContain('Row 11 is broken.')
-            ->and($job->getLogContentsForLevel('error'))->not->toContain('Read 10 rows.');
+            ->and($job->logText('error'))->toContain('Row 11 is broken.')
+            ->and($job->logText('error'))->not->toContain('Read 10 rows.');
     });
 
     it('reads the files of earlier versions', function () {
@@ -186,7 +186,7 @@ describe('the import command', function () {
             ->expectsOutputToContain('Imported 1 log file(s). Skipped 1.')
             ->assertSuccessful();
 
-        expect($job->getLogContents())->toContain('INFO: Started.')
+        expect($job->logText())->toContain('INFO: Started.')
             ->and(File::exists(BackgroundJobs::logPath()."/{$job->id}.log"))->toBeFalse();
     });
 

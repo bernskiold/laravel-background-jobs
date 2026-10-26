@@ -7,8 +7,7 @@
         "queue",
         "jobs",
         "background-jobs",
-        "progress",
-        "livewire"
+        "progress"
     ],
     "homepage": "https://github.com/bernskiold/laravel-background-jobs",
     "license": "MIT",
@@ -29,6 +28,7 @@
     "prefer-stable": true,
     "require": {
         "php": "^8.2",
+        "composer-runtime-api": "^2.2",
         "illuminate/broadcasting": "^11.0 || ^12.0 || ^13.0",
         "illuminate/console": "^11.0 || ^12.0 || ^13.0",
         "illuminate/contracts": "^11.0 || ^12.0 || ^13.0",
@@ -41,15 +41,11 @@
         "larastan/larastan": "^3.0",
         "laravel/pint": "^1.0",
         "league/flysystem-memory": "^3.0",
-        "livewire/livewire": "^3.0 || ^4.0",
         "nunomaduro/collision": "^8.0 || ^9.0",
         "orchestra/testbench": "^9.0 || ^10.0 || ^11.0",
         "pestphp/pest": "^3.0 || ^4.0 || ^5.0",
         "pestphp/pest-plugin-laravel": "^3.0 || ^4.0 || ^5.0",
         "phpstan/phpstan": "^2.1"
-    },
-    "suggest": {
-        "livewire/livewire": "Required to use the headless Livewire components for the job list, the job detail page, the jobs in a run and the jobs of a model."
     },
     "autoload": {
         "psr-4": {

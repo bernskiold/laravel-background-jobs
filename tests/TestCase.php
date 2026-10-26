@@ -7,7 +7,6 @@ use Bernskiold\LaravelBackgroundJobs\LaravelBackgroundJobsServiceProvider;
 use Bernskiold\LaravelBackgroundJobs\Tests\Fixtures\JobType;
 use Bernskiold\LaravelBackgroundJobs\Tests\Fixtures\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Livewire\LivewireServiceProvider;
 use Orchestra\Testbench\TestCase as Orchestra;
 
 class TestCase extends Orchestra
@@ -24,7 +23,6 @@ class TestCase extends Orchestra
     protected function getPackageProviders($app): array
     {
         return [
-            LivewireServiceProvider::class,
             LaravelBackgroundJobsServiceProvider::class,
         ];
     }

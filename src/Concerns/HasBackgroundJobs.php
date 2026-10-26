@@ -30,7 +30,7 @@ trait HasBackgroundJobs
         return $this->backgroundJobs()
             ->ofType($type)
             ->notFinished()
-            ->startedRecently()
+            ->notStale()
             ->exists();
     }
 
@@ -47,7 +47,7 @@ trait HasBackgroundJobs
             ->where('jobable_type', (new static)->getMorphClass())
             ->ofType($type)
             ->notFinished()
-            ->startedRecently()
+            ->notStale()
             ->pluck('jobable_id');
     }
 }

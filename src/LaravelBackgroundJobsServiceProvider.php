@@ -14,6 +14,7 @@ use Bernskiold\LaravelBackgroundJobs\Listeners\RollUpParentBackgroundJob;
 use Bernskiold\LaravelBackgroundJobs\Logging\BackgroundJobLogs;
 use Bernskiold\LaravelBackgroundJobs\Logging\DatabaseLogStore;
 use Bernskiold\LaravelBackgroundJobs\Logging\FileLogStore;
+use Composer\InstalledVersions;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Foundation\Application;
@@ -50,7 +51,9 @@ class LaravelBackgroundJobsServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        AboutCommand::add('Laravel Background Jobs', fn () => ['Version' => '0.1.0']);
+        AboutCommand::add('Laravel Background Jobs', fn () => [
+            'Version' => InstalledVersions::getPrettyVersion('bernskiold/laravel-background-jobs') ?? 'unknown',
+        ]);
 
         $this->publishes([
             __DIR__.'/../config/background-jobs.php' => config_path('background-jobs.php'),

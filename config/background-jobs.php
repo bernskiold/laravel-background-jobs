@@ -94,6 +94,11 @@ return [
     /*
      * The owner of a job gets a notification when the job is finished or
      * failed. A run sends one notification for all of its children.
+     *
+     * These are the defaults. A job type can choose its own notifications
+     * with the ChoosesBackgroundJobNotifications contract, and the app can
+     * choose with BackgroundJobs::chooseNotificationUsing(). Set a class to
+     * null to send nothing for that outcome.
      */
     'notifications' => [
 

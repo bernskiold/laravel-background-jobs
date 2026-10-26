@@ -33,7 +33,7 @@ it('does not run when the background job has failed', function () {
 
     expect(ImportReportJob::$runs)->toBe(0)
         ->and($this->backgroundJob->refresh()->status)->toBe(BackgroundJobStatus::Failed)
-        ->and($this->backgroundJob->getLogContents())->toContain('Skipped ImportReportJob, because the background job has failed.');
+        ->and($this->backgroundJob->logText())->toContain('Skipped ImportReportJob, because the background job has failed.');
 });
 
 it('fails the background job when the queued job throws', function () {

@@ -36,11 +36,10 @@ class FailStaleBackgroundJobsCommand extends Command
     public function handle(): int
     {
         $hours = (int) ($this->option('hours') ?? BackgroundJobs::staleAfterHours());
-        $cutoff = now()->subHours($hours);
 
         $failed = 0;
 
-        $this->staleJobs($cutoff)->chunkById(200, function ($jobs) use ($hours, &$failed) {
+        $this->staleJobs($hours)->chunkById(200, function ($jobs) use ($hours, &$failed) {
             foreach ($jobs as $job) {
                 $job->logChannel()->error("The job had no update for {$hours} hours. The worker probably stopped.");
                 $job->fail(__('The job stopped without a final status. It had no update for :hours hours.', ['hours' => $hours]));
@@ -50,7 +49,7 @@ class FailStaleBackgroundJobsCommand extends Command
 
         $sealed = 0;
 
-        $this->unsealedRuns($cutoff)->chunkById(200, function ($runs) use (&$sealed) {
+        $this->unsealedRuns($hours)->chunkById(200, function ($runs) use (&$sealed) {
             foreach ($runs as $run) {
                 $run->logChannel()->warning('The run was never sealed. It is sealed now with the children that it has.');
                 BackgroundJobRun::for($run)->seal();
@@ -68,11 +67,10 @@ class FailStaleBackgroundJobsCommand extends Command
      *
      * @return Builder<BackgroundJob>
      */
-    protected function staleJobs(\DateTimeInterface $cutoff): Builder
+    protected function staleJobs(int $hours): Builder
     {
         return BackgroundJobs::model()::query()
-            ->notFinished()
-            ->where('updated_at', '<', $cutoff)
+            ->stale($hours)
             ->whereNull('children_expected')
             ->whereDoesntHave('children');
     }
@@ -80,11 +78,10 @@ class FailStaleBackgroundJobsCommand extends Command
     /**
      * @return Builder<BackgroundJob>
      */
-    protected function unsealedRuns(\DateTimeInterface $cutoff): Builder
+    protected function unsealedRuns(int $hours): Builder
     {
         return BackgroundJobs::model()::query()
-            ->notFinished()
-            ->where('updated_at', '<', $cutoff)
+            ->stale($hours)
             ->whereNull('children_expected')
             ->whereHas('children');
     }

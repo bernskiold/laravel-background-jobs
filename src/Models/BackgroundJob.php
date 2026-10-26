@@ -520,17 +520,30 @@ class BackgroundJob extends Model
     }
 
     /**
-     * Jobs that started in the stale window.
+     * Jobs that had an update in the stale window. A status change, a log
+     * entry, a meta change and progress each update a job.
      *
      * When a worker stops during a job, nothing changes the status of the job.
-     * The job then stays at "processing". A page that shows "still running"
-     * must stop to trust such a job after some time.
+     * A page that shows "still running" must not trust such a job. The
+     * "background-jobs:fail-stale" command later fails it.
      *
      * @param  Builder<static>  $query
      */
-    public function scopeStartedRecently(Builder $query): void
+    public function scopeNotStale(Builder $query): void
     {
-        $query->where($query->qualifyColumn('created_at'), '>=', now()->subHours(BackgroundJobs::staleAfterHours()));
+        $query->where($query->qualifyColumn('updated_at'), '>=', now()->subHours(BackgroundJobs::staleAfterHours()));
+    }
+
+    /**
+     * Jobs that are waiting or processing and had no update in the stale
+     * window.
+     *
+     * @param  Builder<static>  $query
+     */
+    public function scopeStale(Builder $query, ?int $hours = null): void
+    {
+        $query->notFinished()
+            ->where($query->qualifyColumn('updated_at'), '<', now()->subHours($hours ?? BackgroundJobs::staleAfterHours()));
     }
 
     /**
@@ -577,17 +590,10 @@ class BackgroundJob extends Model
 
     /**
      * The latest log entries as text, one line for each entry.
+     *
+     * @param  string  $level  Only lines of this level, for example "error". The value "all" gives all the lines.
      */
-    public function getLogContents(): string
-    {
-        return $this->getLogContentsForLevel('all');
-    }
-
-    /**
-     * The log lines of one level, for example "error". The value "all" gives
-     * all the lines.
-     */
-    public function getLogContentsForLevel(string $level = 'all'): string
+    public function logText(string $level = 'all'): string
     {
         return implode("\n", array_map(
             fn (LogEntry $entry) => $entry->format(),

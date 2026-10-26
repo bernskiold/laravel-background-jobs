@@ -3,11 +3,14 @@
 namespace Bernskiold\LaravelBackgroundJobs;
 
 use Bernskiold\LaravelBackgroundJobs\Contracts\BackgroundJobType;
+use Bernskiold\LaravelBackgroundJobs\Contracts\ChoosesBackgroundJobNotifications;
+use Bernskiold\LaravelBackgroundJobs\Enums\BackgroundJobOutcome;
 use Bernskiold\LaravelBackgroundJobs\Exceptions\InvalidBackgroundJobType;
 use Bernskiold\LaravelBackgroundJobs\Logging\BackgroundJobLogs;
 use Bernskiold\LaravelBackgroundJobs\Models\BackgroundJob;
 use Closure;
 use Illuminate\Database\Query\Builder;
+use Illuminate\Notifications\Notification;
 use Illuminate\Support\Collection;
 
 /**
@@ -28,6 +31,11 @@ class BackgroundJobs
     protected static ?Closure $urlResolver = null;
 
     /**
+     * @var (Closure(BackgroundJob, BackgroundJobOutcome): (Notification|false|null))|null
+     */
+    protected static ?Closure $notificationResolver = null;
+
+    /**
      * @return class-string<BackgroundJob>
      */
     public static function model(): string
@@ -43,6 +51,8 @@ class BackgroundJobs
     }
 
     /**
+     * @internal
+     *
      * A query on the jobs table that does not use Eloquent. It does not fire
      * model events and it does not touch "updated_at". The run roll-up uses
      * it for its atomic updates.
@@ -168,12 +178,51 @@ class BackgroundJobs
     }
 
     /**
+     * Set how the package chooses the notification for a job. The callback
+     * receives the job and its outcome. Return a notification to send it,
+     * false to send nothing, or null to let the job type and then the config
+     * choose.
+     *
+     * @param  (Closure(BackgroundJob, BackgroundJobOutcome): (Notification|false|null))|null  $resolver
+     */
+    public static function chooseNotificationUsing(?Closure $resolver): void
+    {
+        static::$notificationResolver = $resolver;
+    }
+
+    /**
+     * The notification for the outcome of a job, or null when the job sends
+     * nothing. The order is: the callback of chooseNotificationUsing(), the
+     * job type when it implements ChoosesBackgroundJobNotifications, and then
+     * the "background-jobs.notifications" config.
+     */
+    public static function notificationFor(BackgroundJob $job, BackgroundJobOutcome $outcome): ?Notification
+    {
+        $choice = static::$notificationResolver !== null
+            ? (static::$notificationResolver)($job, $outcome)
+            : null;
+
+        if ($choice === null && $job->type instanceof ChoosesBackgroundJobNotifications) {
+            $choice = $job->type->notificationFor($outcome, $job);
+        }
+
+        if ($choice !== null) {
+            return $choice === false ? null : $choice;
+        }
+
+        $class = config("background-jobs.notifications.{$outcome->value}");
+
+        return $class === null ? null : new $class($job);
+    }
+
+    /**
      * Remove the runtime state. Use it between tests.
      */
     public static function flush(): void
     {
         static::$registeredTypes = [];
         static::$urlResolver = null;
+        static::$notificationResolver = null;
     }
 
     /**
