@@ -35,6 +35,7 @@ use Psr\Log\LoggerInterface;
  * @property string|null $jobable_type
  * @property int|string|null $jobable_id
  * @property int|string|null $user_id
+ * @property bool $notify_owner
  * @property BackgroundJobType|null $type
  * @property BackgroundJobStatus $status
  * @property string|null $failure_reason
@@ -67,6 +68,7 @@ class BackgroundJob extends Model
         'children_succeeded' => 0,
         'children_failed' => 0,
         'progress_processed' => 0,
+        'notify_owner' => true,
     ];
 
     /**
@@ -107,6 +109,7 @@ class BackgroundJob extends Model
             'children_failed' => 'integer',
             'progress_total' => 'integer',
             'progress_processed' => 'integer',
+            'notify_owner' => 'boolean',
             'sealed_at' => 'datetime',
             'finished_at' => 'datetime',
             'rolled_up_at' => 'datetime',
@@ -124,7 +127,12 @@ class BackgroundJob extends Model
      * The owner is the user you give. If you do not give a user, the owner is
      * the owner of the parent run, and then the user who is logged in. A
      * queued listener often has no logged-in user, so the parent is the
-     * fallback for children. A job without an owner sends no notification.
+     * fallback for children.
+     *
+     * The owner gets a notification when the job is finished or failed. Set
+     * $notify to false to keep the owner, so that you know who started the
+     * job, but send nothing. A child gets the setting of its run. A job
+     * without an owner never sends a notification.
      *
      * @param  array<string, mixed>  $meta
      */
@@ -135,6 +143,7 @@ class BackgroundJob extends Model
         int|string|null $userId = null,
         bool $withoutOwner = false,
         ?self $parent = null,
+        ?bool $notify = null,
     ): static {
         return static::query()->create([
             'parent_id' => $parent?->getKey(),
@@ -142,8 +151,18 @@ class BackgroundJob extends Model
             'jobable_type' => $model?->getMorphClass(),
             'type' => $type,
             'user_id' => $withoutOwner ? null : ($userId ?? $parent->user_id ?? auth()->id()),
+            'notify_owner' => $notify ?? $parent->notify_owner ?? true,
             'meta' => $meta,
         ]);
+    }
+
+    /**
+     * Tells if the owner gets a notification when the job is finished or
+     * failed. A job without an owner never sends one.
+     */
+    public function notifiesOwner(): bool
+    {
+        return $this->notify_owner && $this->user_id !== null;
     }
 
     /**

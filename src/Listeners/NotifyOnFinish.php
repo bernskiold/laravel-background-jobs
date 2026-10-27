@@ -15,8 +15,8 @@ use Illuminate\Support\Facades\Gate;
  * Notifies the owner of a job when the job is finished or failed.
  *
  * A run sends one notification for all of its children. The children of a run
- * do not send notifications. A job without an owner does not send a
- * notification. See BackgroundJobs::notificationFor() for how the notification
+ * do not send notifications. A job without an owner, or a job that was made
+ * with "notify: false", does not send a notification. See BackgroundJobs::notificationFor() for how the notification
  * is chosen.
  */
 class NotifyOnFinish implements ShouldQueue
@@ -26,7 +26,7 @@ class NotifyOnFinish implements ShouldQueue
         $job = $this->find($event);
         $user = $job?->user;
 
-        if ($job === null || $user === null || ! method_exists($user, 'notify')) {
+        if ($job === null || $user === null || ! $job->notifiesOwner() || ! method_exists($user, 'notify')) {
             return;
         }
 
@@ -49,7 +49,9 @@ class NotifyOnFinish implements ShouldQueue
 
         $job = $this->find($event);
 
-        if ($job === null || $job->isChild() || $job->user_id === null) {
+        // The setting of the job comes first. The caller asked for no
+        // notification, so the hooks and the config do not apply.
+        if ($job === null || $job->isChild() || ! $job->notifiesOwner()) {
             return false;
         }
 

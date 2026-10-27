@@ -28,6 +28,9 @@ class BackgroundJobRun
     private function __construct(public readonly BackgroundJob $job) {}
 
     /**
+     * Set $notify to false to keep the owner but send no notification when
+     * the run settles.
+     *
      * @param  array<string, mixed>  $meta
      */
     public static function start(
@@ -36,6 +39,7 @@ class BackgroundJobRun
         array $meta = [],
         int|string|null $userId = null,
         bool $withoutOwner = false,
+        bool $notify = true,
     ): self {
         $job = BackgroundJobs::model()::generateFor(
             model: $jobable,
@@ -43,6 +47,7 @@ class BackgroundJobRun
             meta: $meta,
             userId: $userId,
             withoutOwner: $withoutOwner,
+            notify: $notify,
         );
 
         return new self($job->start());

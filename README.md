@@ -114,7 +114,16 @@ $job = BackgroundJob::generateFor(
 );
 ```
 
-The owner is the user who is logged in. You can give a different owner with `userId:`. A job without an owner does not send an email. Use `withoutOwner: true` for system jobs.
+The owner is the user who is logged in. You can give a different owner with `userId:`. The owner gets an email when the job is finished or failed.
+
+To know who started a job, but send no email, use `notify: false`. The job keeps its owner:
+
+```php
+BackgroundJob::generateFor($study, JobType::GenerateData, notify: false);
+BackgroundJobRun::start(JobType::GenerateData, notify: false);
+```
+
+Use `withoutOwner: true` for system jobs. A job without an owner never sends an email.
 
 ### Change the status
 
@@ -371,7 +380,7 @@ By default, the owner gets one of these notifications:
 - `BackgroundJobFailed` when a job failed.
 - `BackgroundJobRunCompleted` when a run is settled.
 
-The children of a run do not send notifications. Set the queue, the channels and the default classes in the config. Set a class to `null` to send nothing for that outcome:
+The children of a run do not send notifications. A job made with `notify: false` does not send a notification, whatever the hooks below choose. Set the queue, the channels and the default classes in the config. Set a class to `null` to send nothing for that outcome:
 
 ```php
 'notifications' => [

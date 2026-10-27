@@ -22,4 +22,5 @@ All notable changes to `laravel-background-jobs` will be documented in this file
 - The `background-jobs:fail-stale` command, which fails jobs whose worker stopped and seals runs that were never sealed. A log entry, a meta change and progress each count as an update.
 - Progress for standalone jobs, with `setProgressTotal()` and `advanceProgress()`.
 - Retention with `model:prune`, configured in days for finished and for failed jobs.
+- A `notify: false` option on `generateFor()` and `BackgroundJobRun::start()`. The job keeps its owner but sends no notification. A child gets the setting of its run.
 - A separate log retention, with the `background-jobs:prune-logs` command, which deletes old logs and keeps the jobs.

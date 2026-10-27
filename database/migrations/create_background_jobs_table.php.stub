@@ -19,6 +19,7 @@ return new class extends Migration
                 ->nullable()
                 ->constrained()
                 ->nullOnDelete();
+            $table->boolean('notify_owner')->default(true);
             $table->string('type');
             $table->unsignedSmallInteger('status')->default(0);
             $table->text('failure_reason')->nullable();

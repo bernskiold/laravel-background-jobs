@@ -90,6 +90,14 @@ class BackgroundJobFactory extends Factory
     }
 
     /**
+     * A job that keeps its owner but sends no notification.
+     */
+    public function withoutNotifications(): static
+    {
+        return $this->state(fn () => ['notify_owner' => false]);
+    }
+
+    /**
      * A child of the run. The child gets the type and the owner of the run.
      */
     public function childOf(BackgroundJob $run): static
@@ -98,6 +106,7 @@ class BackgroundJobFactory extends Factory
             'parent_id' => $run->getKey(),
             'type' => $run->type,
             'user_id' => $run->user_id,
+            'notify_owner' => $run->notify_owner,
         ]);
     }
 }
