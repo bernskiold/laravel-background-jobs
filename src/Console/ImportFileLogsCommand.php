@@ -3,11 +3,12 @@
 namespace Bernskiold\LaravelBackgroundJobs\Console;
 
 use Bernskiold\LaravelBackgroundJobs\BackgroundJobs;
+use Bernskiold\LaravelBackgroundJobs\Contracts\BackgroundJobLogStore;
 use Bernskiold\LaravelBackgroundJobs\Logging\FileLogStore;
-use Bernskiold\LaravelBackgroundJobs\Logging\LogEntry;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
 use Symfony\Component\Console\Attribute\AsCommand;
+use Throwable;
 
 /**
  * Copies the log files of earlier versions into the configured log store.
@@ -23,6 +24,11 @@ class ImportFileLogsCommand extends Command
         {--delete : Delete each file after the import.}';
 
     protected $description = 'Copy the log files of background jobs into the configured log store.';
+
+    /**
+     * The number of entries that the command writes at a time.
+     */
+    protected const BATCH_SIZE = 500;
 
     public function handle(): int
     {
@@ -53,9 +59,12 @@ class ImportFileLogsCommand extends Command
                 continue;
             }
 
-            foreach (array_chunk(FileLogStore::parse((string) File::get($file)), 500) as $entries) {
-                /** @var list<LogEntry> $entries */
-                $store->write($jobId, $entries);
+            try {
+                $this->import($store, $jobId, $file);
+            } catch (Throwable $exception) {
+                $store->delete($jobId);
+
+                throw $exception;
             }
 
             if ($this->option('delete')) {
@@ -68,5 +77,25 @@ class ImportFileLogsCommand extends Command
         $this->components->info("Imported {$imported} log file(s). Skipped {$skipped}.");
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Write the entries of one file in batches. The command reads the file
+     * line by line, so a large file does not have to fit in memory.
+     */
+    protected function import(BackgroundJobLogStore $store, string $jobId, string $file): void
+    {
+        $batch = [];
+
+        foreach (FileLogStore::stream($file) as $entry) {
+            $batch[] = $entry;
+
+            if (count($batch) >= self::BATCH_SIZE) {
+                $store->write($jobId, $batch);
+                $batch = [];
+            }
+        }
+
+        $store->write($jobId, $batch);
     }
 }

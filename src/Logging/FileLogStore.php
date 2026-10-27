@@ -5,6 +5,7 @@ namespace Bernskiold\LaravelBackgroundJobs\Logging;
 use Bernskiold\LaravelBackgroundJobs\BackgroundJobs;
 use Bernskiold\LaravelBackgroundJobs\Contracts\BackgroundJobLogStore;
 use Carbon\CarbonImmutable;
+use Generator;
 use Illuminate\Support\Facades\File;
 use Throwable;
 
@@ -42,7 +43,7 @@ class FileLogStore implements BackgroundJobLogStore
             return [];
         }
 
-        $entries = static::parse((string) File::get($this->path($jobId)));
+        $entries = iterator_to_array(static::stream($this->path($jobId)), false);
 
         if ($level !== null) {
             $entries = array_values(array_filter($entries, fn (LogEntry $entry) => $entry->level === $level));
@@ -74,21 +75,52 @@ class FileLogStore implements BackgroundJobLogStore
     }
 
     /**
-     * Read the entries from the text of a log file. A line that does not start
-     * a new entry, for example a line of a stack trace, belongs to the entry
-     * before it.
+     * Read the entries from the text of a log file.
      *
      * @return list<LogEntry>
      */
     public static function parse(string $contents): array
     {
-        $entries = [];
+        return iterator_to_array(static::entries(preg_split('/\R/', $contents) ?: []), false);
+    }
+
+    /**
+     * Read the entries from a log file one at a time. Only one entry is in
+     * memory at a time, so the size of the file is not important.
+     *
+     * @return Generator<int, LogEntry>
+     */
+    public static function stream(string $path): Generator
+    {
+        $handle = fopen($path, 'rb');
+
+        if ($handle === false) {
+            return;
+        }
+
+        try {
+            yield from static::entries(static::lines($handle));
+        } finally {
+            fclose($handle);
+        }
+    }
+
+    /**
+     * Make entries from the lines of a log file. A line that does not start a
+     * new entry, for example a line of a stack trace, belongs to the entry
+     * before it.
+     *
+     * @param  iterable<string>  $lines
+     * @return Generator<int, LogEntry>
+     */
+    protected static function entries(iterable $lines): Generator
+    {
         $current = null;
 
-        foreach (preg_split('/\R/', $contents) ?: [] as $line) {
+        foreach ($lines as $line) {
             if (preg_match(self::LINE_PATTERN, $line, $matches)) {
                 if ($current !== null) {
-                    $entries[] = static::toEntry($current);
+                    yield static::toEntry($current);
                 }
 
                 $current = [
@@ -106,10 +138,19 @@ class FileLogStore implements BackgroundJobLogStore
         }
 
         if ($current !== null) {
-            $entries[] = static::toEntry($current);
+            yield static::toEntry($current);
         }
+    }
 
-        return $entries;
+    /**
+     * @param  resource  $handle
+     * @return Generator<int, string>
+     */
+    protected static function lines($handle): Generator
+    {
+        while (($line = fgets($handle)) !== false) {
+            yield rtrim($line, "\r\n");
+        }
     }
 
     /**
