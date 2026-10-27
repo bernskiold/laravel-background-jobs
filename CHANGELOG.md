@@ -2,6 +2,11 @@
 
 All notable changes to `laravel-background-jobs` will be documented in this file.
 
+## 1.0.1 - 2026-10-27
+
+- The `background-jobs:import-file-logs` command reads each log file line by line and writes 500 entries at a time. Before, a large log file stopped the command with an "Allowed memory size exhausted" error.
+- If a write fails, the import command deletes the entries that it wrote for that job. A second run then imports the file again.
+
 ## 1.0.0 - 2026-10-27
 
 - Initial release.
