@@ -203,6 +203,56 @@ describe('the import command', function () {
         expect($job->logEntries())->toHaveCount(1);
     });
 
+    it('imports a large file in batches without reading it into memory', function () {
+        $job = BackgroundJob::factory()->create();
+        $path = BackgroundJobs::logPath()."/{$job->id}.log";
+
+        File::ensureDirectoryExists(BackgroundJobs::logPath());
+
+        $handle = fopen($path, 'wb');
+
+        for ($i = 1; $i <= 20_000; $i++) {
+            fwrite($handle, "[2026-10-20T10:00:00.000000+00:00] background-job.INFO: Row {$i} of a long import with a long message. [] []\n");
+            fwrite($handle, "#0 /app/Import.php(12): run()\n");
+        }
+
+        fclose($handle);
+
+        $before = memory_get_usage();
+        memory_reset_peak_usage();
+
+        $this->artisan('background-jobs:import-file-logs', ['--delete' => true])
+            ->expectsOutputToContain('Imported 1 log file(s). Skipped 0.')
+            ->assertSuccessful();
+
+        $peak = memory_get_peak_usage() - $before;
+        $rows = DB::table('background_job_logs')->where('background_job_id', $job->id)->orderBy('id');
+
+        expect($rows->count())->toBe(20_000)
+            ->and($rows->value('message'))->toBe("Row 1 of a long import with a long message. [] []\n#0 /app/Import.php(12): run()")
+            ->and($peak)->toBeLessThan(8 * 1024 * 1024)
+            ->and(File::exists($path))->toBeFalse();
+    });
+
+    it('removes a partial import when a batch fails', function () {
+        $job = BackgroundJob::factory()->create();
+        $path = BackgroundJobs::logPath()."/{$job->id}.log";
+
+        File::ensureDirectoryExists(BackgroundJobs::logPath());
+        File::put($path, str_repeat("[2026-10-20T10:00:00.000000+00:00] background-job.INFO: Row. [] []\n", 501));
+
+        DB::listen(function ($query) {
+            if (str_starts_with($query->sql, 'insert') && DB::table('background_job_logs')->count() >= 500) {
+                throw new RuntimeException('The database went away.');
+            }
+        });
+
+        expect(fn () => $this->artisan('background-jobs:import-file-logs', ['--delete' => true])->run())
+            ->toThrow(RuntimeException::class, 'The database went away.')
+            ->and(DB::table('background_job_logs')->where('background_job_id', $job->id)->exists())->toBeFalse()
+            ->and(File::exists($path))->toBeTrue();
+    });
+
     it('refuses to import into the file store', function () {
         config(['background-jobs.logs.store' => 'file']);
         app()->forgetInstance(BackgroundJobLogStore::class);
