@@ -11,16 +11,22 @@ jobs:
     test:
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
         runs-on: ${{ matrix.os }}
+        # PHP 8.6 is pre-release; let it fail without failing the build.
+        continue-on-error: ${{ matrix.php == '8.6' }}
         strategy:
             fail-fast: false
             matrix:
                 os: [ubuntu-latest]
-                php: [8.4, 8.3, 8.2]
+                php: [8.6, 8.5, 8.4, 8.3, 8.2]
                 laravel: ["^13.0", "^12.0", "^11.0"]
                 dependency-version: [prefer-stable]
                 exclude:
                     - laravel: "^13.0"
                       php: 8.2
+                    - laravel: "^11.0"
+                      php: 8.5
+                    - laravel: "^11.0"
+                      php: 8.6
         name: P${{ matrix.php }} - L${{ matrix.laravel }} - ${{ matrix.dependency-version }} - ${{ matrix.os }}
 
         steps:
