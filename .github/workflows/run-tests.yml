@@ -9,10 +9,7 @@ on:
 
 jobs:
     test:
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
         runs-on: ${{ matrix.os }}
-        # PHP 8.6 is pre-release; let it fail without failing the build.
-        continue-on-error: ${{ matrix.php == '8.6' }}
         strategy:
             fail-fast: false
             matrix:
@@ -23,6 +20,10 @@ jobs:
                 exclude:
                     - laravel: "^13.0"
                       php: 8.2
+                    # Laravel 12 supports PHP 8.2 to 8.5 and gets security fixes only.
+                    # It fails on PHP 8.6 (missing create_sid(), spl_object_hash() deprecations).
+                    - laravel: "^12.0"
+                      php: 8.6
         name: P${{ matrix.php }} - L${{ matrix.laravel }} - ${{ matrix.dependency-version }} - ${{ matrix.os }}
 
         steps:
