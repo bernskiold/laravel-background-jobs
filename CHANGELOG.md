@@ -2,6 +2,15 @@
 
 All notable changes to `laravel-background-jobs` will be documented in this file.
 
+## 1.0.2 - 2026-11-20
+
+### What's Changed
+
+* Add PHP 8.5 and 8.6 support and drop Laravel 11 by @ErikBernskiold in https://github.com/bernskiold/laravel-background-jobs/pull/4
+* Make PHP 8.6 a required part of the test matrix by @ErikBernskiold in https://github.com/bernskiold/laravel-background-jobs/pull/5
+
+**Full Changelog**: https://github.com/bernskiold/laravel-background-jobs/compare/1.0.1...1.0.2
+
 ## 1.0.1 - 2026-10-27
 
 - The `background-jobs:import-file-logs` command reads each log file line by line and writes 500 entries at a time. Before, a large log file stopped the command with an "Allowed memory size exhausted" error.
